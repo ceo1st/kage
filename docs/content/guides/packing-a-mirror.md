@@ -83,7 +83,7 @@ The window title comes from the archive's title. This build needs cgo and links 
 
 ### Build a viewer for another platform
 
-The appended archive is platform-independent; only the base executable carries the architecture. Point `--base` at a kage binary built for another OS (download one from a kage release) to produce a viewer for that platform from your own machine:
+The appended archive is platform-independent; only the base executable carries the architecture. Point `--base` at a kage binary built for another OS (download one from a kage release; every platform ships one) to produce a viewer for that platform from your own machine. kage reads the base's executable header to detect the target OS, so a Windows viewer automatically gets a `.exe` name and the run hint names the right platform:
 
 ```bash
 # From macOS, build a Windows viewer

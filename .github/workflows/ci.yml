@@ -38,7 +38,7 @@ jobs:
         id: chrome
       - name: gofmt
         run: |
-          unformatted=$(gofmt -s -l asset browser cli clone cmd robots sanitize urlx)
+          unformatted=$(gofmt -s -l .)
           if [ -n "$unformatted" ]; then
             echo "These files need gofmt -s -w:"
             echo "$unformatted"
@@ -101,3 +101,21 @@ jobs:
         run: |
           go mod tidy
           git diff --exit-code -- go.mod go.sum
+
+  # Compile the optional native-window viewer (-tags webview, cgo) so that path
+  # keeps building. The default CI build is pure Go and never touches it. The
+  # viewer code is the same Go on every OS, only the system WebView library
+  # differs, so a macOS compile (WebKit ships in the SDK) catches our
+  # regressions without the WebKitGTK version juggling Linux runners need. It is
+  # build-only: actually opening a window needs a display.
+  webview:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          check-latest: true
+          cache: true
+      - name: build webview viewer
+        run: CGO_ENABLED=1 go build -tags webview ./cmd/kage

@@ -79,16 +79,22 @@ func runPack(mirrorArg string, f *packFlags) error {
 		if err != nil {
 			return err
 		}
+		target := resolveTargetOS(f.base)
 		out := f.out
 		if out == "" {
-			out = defaultBinaryName(dir, f.base)
+			out = defaultBinaryName(dir)
+		}
+		// A Windows viewer must end in .exe to run, whether the name came from
+		// --out or the default, so make sure it does.
+		if target == "windows" && !strings.HasSuffix(strings.ToLower(out), ".exe") {
+			out += ".exe"
 		}
 		path, size, err := pack.BuildBinary(zbytes, pack.BinaryOptions{Out: out, Base: f.base})
 		if err != nil {
 			return err
 		}
 		printPackResult(path, size)
-		printRunHint(path)
+		printRunHint(path, target)
 		return nil
 
 	default:
@@ -110,27 +116,32 @@ func resolveMirror(arg string) string {
 	return arg
 }
 
-// defaultBinaryName derives a clean program name from the mirror's host: strip a
-// trailing dot-suffix (paulgraham.com -> paulgraham), and append .exe when the
-// target is Windows. The target is the running OS unless --base names a binary
-// that looks like it was built for Windows.
-func defaultBinaryName(dir, base string) string {
+// defaultBinaryName derives a clean program name from the mirror's host by
+// stripping a trailing dot-suffix (paulgraham.com -> paulgraham). The caller
+// appends .exe for Windows targets.
+func defaultBinaryName(dir string) string {
 	host := filepath.Base(dir)
-	name := host
 	if i := strings.IndexByte(host, '.'); i > 0 {
-		name = host[:i]
+		return host[:i]
 	}
-	if windowsTarget(base) {
-		name += ".exe"
-	}
-	return name
+	return host
 }
 
-func windowsTarget(base string) bool {
+// resolveTargetOS reports which OS the packed viewer will run on. With no
+// --base it is this kage's OS; with one, we sniff the base's executable header
+// so detection does not hinge on the file being named ".exe". If the header is
+// unrecognised we fall back to that name heuristic.
+func resolveTargetOS(base string) string {
 	if base == "" {
-		return runtime.GOOS == "windows"
+		return runtime.GOOS
 	}
-	return strings.HasSuffix(strings.ToLower(base), ".exe")
+	if os := pack.SniffOS(base); os != "" {
+		return os
+	}
+	if strings.HasSuffix(strings.ToLower(base), ".exe") {
+		return "windows"
+	}
+	return ""
 }
 
 func printPackResult(path string, size int64) {
@@ -138,18 +149,35 @@ func printPackResult(path string, size int64) {
 	fmt.Fprintf(os.Stderr, "  %s %s\n", styleAccent.Render("size"), humanBytes(size))
 }
 
-func printRunHint(path string) {
+func printRunHint(path, target string) {
 	rel := path
 	if !strings.ContainsAny(path, "/\\") {
 		rel = "./" + path
 	}
-	if windowsTarget(path) && runtime.GOOS != "windows" {
-		fmt.Fprintf(os.Stderr, "  this is a Windows viewer; run %s on Windows\n", styleAccent.Render(filepath.Base(path)))
+	// A viewer built for another OS cannot run here, so say where it goes
+	// instead of printing a run command that would not work.
+	if target != "" && target != runtime.GOOS {
+		fmt.Fprintf(os.Stderr, "  this is a %s viewer; copy %s to that machine to run it\n",
+			osLabel(target), styleAccent.Render(filepath.Base(path)))
 		return
 	}
 	fmt.Fprintf(os.Stderr, "  run %s to view the site offline\n", styleAccent.Render(rel))
-	if runtime.GOOS == "darwin" {
+	if target == "darwin" {
 		fmt.Fprintln(os.Stderr, styleDim.Render("  (macOS may quarantine it: xattr -d com.apple.quarantine "+rel+")"))
+	}
+}
+
+// osLabel turns a GOOS value into a friendly name for the run hint.
+func osLabel(goos string) string {
+	switch goos {
+	case "windows":
+		return "Windows"
+	case "darwin":
+		return "macOS"
+	case "linux":
+		return "Linux"
+	default:
+		return goos
 	}
 }
 

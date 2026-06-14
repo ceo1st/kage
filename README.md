@@ -149,7 +149,7 @@ kage pack paulgraham.com --format binary -o paulgraham
 ./paulgraham
 ```
 
-The appended archive is platform-independent; only the base executable carries the architecture. By default kage appends to itself, so you get a viewer for the machine you ran it on. Point `--base` at a kage built for another OS to produce a viewer for that platform from your own machine:
+The appended archive is platform-independent; only the base executable carries the architecture. By default kage appends to itself, so you get a viewer for the machine you ran it on. Point `--base` at a kage built for another OS (grab one from a [release](https://github.com/tamnd/kage/releases); every platform ships one) to produce a viewer for that platform from your own machine. kage reads the base's executable header to figure out the target, so a Windows viewer automatically gets a `.exe` name:
 
 ```bash
 # Sitting on a Mac, build a Windows viewer
