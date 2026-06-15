@@ -186,9 +186,27 @@ func printSummary(res clone.Result) {
 		styleAccent.Render("assets"), res.Assets)
 	if res.PageErrors+res.AssetErrors > 0 {
 		fmt.Fprintf(os.Stderr, "  %s %d\n", styleErr.Render("errors"), res.PageErrors+res.AssetErrors)
+		printFailures(res)
 	}
 	if res.Skipped > 0 {
 		fmt.Fprintf(os.Stderr, "  %s %d\n", styleWarn.Render("skipped"), res.Skipped)
 	}
 	fmt.Fprintf(os.Stderr, "  open %s\n", styleAccent.Render("kage serve "+res.OutDir))
+}
+
+// printFailures lists what went wrong, grouped reason and URL, so the error
+// count is actionable instead of opaque. The list is capped during the crawl;
+// when it overflows, say how many more there were.
+func printFailures(res clone.Result) {
+	total := res.PageErrors + res.AssetErrors
+	for _, f := range res.Failures {
+		line := fmt.Sprintf("    %s  %s", styleErr.Render(f.Reason), f.URL)
+		fmt.Fprintln(os.Stderr, line)
+		if f.Referer != "" {
+			fmt.Fprintln(os.Stderr, styleDim.Render("      referenced by "+f.Referer))
+		}
+	}
+	if more := total - int64(len(res.Failures)); more > 0 {
+		fmt.Fprintln(os.Stderr, styleDim.Render(fmt.Sprintf("    ... and %d more", more)))
+	}
 }

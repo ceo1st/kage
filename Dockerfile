@@ -29,7 +29,14 @@ WORKDIR /out
 # Point kage at the bundled Chromium and write mirrors under /out by default:
 #
 #   docker run -v "$PWD/out:/out" ghcr.io/tamnd/kage clone example.com
-ENV KAGE_CHROME=/usr/bin/chromium-browser
+#
+# The kage user has no home directory of its own, so HOME points at the mounted
+# /out volume. That keeps two things writable: kage's default output and resume
+# state (it lands under $HOME/data/kage), and Chrome's profile and crash
+# database. Without this both fail with a permission error in the container
+# (issue #7), and the mounted volume captures nothing.
+ENV KAGE_CHROME=/usr/bin/chromium-browser \
+    HOME=/out
 
 VOLUME ["/out"]
 

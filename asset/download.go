@@ -2,6 +2,7 @@ package asset
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -18,6 +19,7 @@ type Downloader struct {
 	Client    *http.Client
 	UserAgent string
 	MaxBytes  int64 // per-asset cap; 0 = unlimited
+	Retries   int   // extra attempts for a transient failure (0 = try once)
 }
 
 // NewDownloader builds a Downloader with a sane client and the given timeout.
@@ -26,6 +28,10 @@ func NewDownloader(userAgent string, timeout time.Duration, maxBytes int64) *Dow
 		Client:    &http.Client{Timeout: timeout},
 		UserAgent: userAgent,
 		MaxBytes:  maxBytes,
+		// A few sites (and the bot-protection in front of them) reject the first
+		// request of a burst with a 403 or 429 but serve a retry fine, so give
+		// transient failures a couple of extra tries before giving up.
+		Retries: 3,
 	}
 }
 
@@ -36,9 +42,55 @@ type Result struct {
 	IsCSS       bool
 }
 
+// StatusError reports a non-2xx HTTP response. It carries the code so callers
+// can render a clear message ("HTTP 403 Forbidden") and decide whether a retry
+// is worthwhile, without the URL baked in (the caller already has it).
+type StatusError struct {
+	Code int
+}
+
+func (e *StatusError) Error() string {
+	if t := http.StatusText(e.Code); t != "" {
+		return fmt.Sprintf("HTTP %d %s", e.Code, t)
+	}
+	return fmt.Sprintf("HTTP %d", e.Code)
+}
+
 // Get fetches u, sending referer as the Referer header. It reads at most
 // MaxBytes and reports whether the body is CSS (so the caller can rewrite it).
+// A transient failure (a 403/429/5xx or a network blip) is retried with a short
+// backoff up to Retries times.
 func (d *Downloader) Get(ctx context.Context, u *url.URL, referer string) (*Result, error) {
+	attempts := d.Retries + 1
+	if attempts < 1 {
+		attempts = 1
+	}
+	var lastErr error
+	for i := 0; i < attempts; i++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if i > 0 {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(backoff(i)):
+			}
+		}
+		res, err := d.try(ctx, u, referer)
+		if err == nil {
+			return res, nil
+		}
+		lastErr = err
+		if !transient(err) {
+			break
+		}
+	}
+	return nil, lastErr
+}
+
+// try performs a single fetch attempt.
+func (d *Downloader) try(ctx context.Context, u *url.URL, referer string) (*Result, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
 		return nil, err
@@ -55,7 +107,7 @@ func (d *Downloader) Get(ctx context.Context, u *url.URL, referer string) (*Resu
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("status %d for %s", resp.StatusCode, u)
+		return nil, &StatusError{Code: resp.StatusCode}
 	}
 	var r io.Reader = resp.Body
 	if d.MaxBytes > 0 {
@@ -71,6 +123,34 @@ func (d *Downloader) Get(ctx context.Context, u *url.URL, referer string) (*Resu
 		ContentType: ct,
 		IsCSS:       isCSS(ct, u),
 	}, nil
+}
+
+// backoff returns the pause before retry attempt i (1-based): 500ms, 1s, 2s, …
+func backoff(i int) time.Duration {
+	d := 500 * time.Millisecond << (i - 1)
+	if max := 5 * time.Second; d > max {
+		d = max
+	}
+	return d
+}
+
+// transient reports whether an error is worth retrying. Bot-protection statuses
+// (403/429), request-timeout and too-early (408/425), and 5xx server errors are
+// transient; other 4xx (404, 401, 410, …) are permanent. A network error is
+// retried, but a cancelled or expired context is not.
+func transient(err error) bool {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	var se *StatusError
+	if errors.As(err, &se) {
+		switch se.Code {
+		case http.StatusForbidden, http.StatusRequestTimeout, http.StatusTooEarly, http.StatusTooManyRequests:
+			return true
+		}
+		return se.Code >= 500
+	}
+	return true
 }
 
 // isCSS reports whether a response is a stylesheet, by content-type or by a

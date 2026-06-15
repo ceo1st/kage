@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -130,9 +131,30 @@ func (p *Pool) getBrowser() (*rod.Browser, error) {
 		l := launcher.New().
 			Headless(p.opts.Headless).
 			Set("disable-blink-features", "AutomationControlled").
-			Set("disable-dev-shm-usage", "").
-			Set("no-sandbox", "").
 			Set("disable-gpu", "")
+
+		// Chrome's sandbox is the main line of defense when rendering pages from
+		// the open web, so kage keeps it on by default (issue #10). It is dropped
+		// only where it genuinely cannot initialize: inside a container, or when
+		// running as root, where Chrome otherwise refuses to start. The decision
+		// is logged so it is never silent.
+		if off, reason := disableSandbox(); off {
+			l = l.Set("no-sandbox", "")
+			warnSandboxDisabled(reason)
+		}
+
+		// In a container, the default /dev/shm is only 64 MB, too small for
+		// Chrome's renderer on large pages, so steer it to a temp file instead.
+		// Outside a container /dev/shm is roomy and faster, so leave it alone.
+		// Chrome's crashpad handler also aborts with "--database is required" in a
+		// minimal container, which fails the whole launch (issue #7), so turn the
+		// crash reporter off there. kage never uploads Chrome crash dumps anyway.
+		if inContainer() {
+			l = l.Set("disable-dev-shm-usage", "").
+				Set("disable-crash-reporter", "").
+				Set("disable-breakpad", "")
+		}
+
 		if bin := p.chromeBin(); bin != "" {
 			l = l.Bin(bin)
 		}
@@ -222,6 +244,80 @@ func systemChromeCandidates() []string {
 			"/usr/bin/chromium",
 			"/usr/bin/chromium-browser",
 		}
+	}
+}
+
+// disableSandbox decides whether Chrome should launch without its sandbox, with
+// a short reason for the log. The secure default is to keep the sandbox on; it
+// is dropped only where it cannot run: inside a container, or when running as
+// root (Chrome refuses to start a sandbox as root).
+func disableSandbox() (off bool, reason string) {
+	if inContainer() {
+		return true, "container"
+	}
+	if isRoot() {
+		return true, "root"
+	}
+	return false, ""
+}
+
+// warnSandboxDisabled prints why the sandbox was turned off, so dropping a
+// security boundary is always visible rather than silent.
+func warnSandboxDisabled(reason string) {
+	switch reason {
+	case "container":
+		fmt.Fprintln(os.Stderr, "kage: container detected, Chrome sandbox disabled")
+	case "root":
+		fmt.Fprintln(os.Stderr, "kage: running as root, Chrome sandbox disabled (run as a non-root user to keep it on)")
+	}
+}
+
+// inContainer reports whether kage is running inside a container, where Chrome
+// needs container-specific flags. It honors IN_DOCKER (set it in your image)
+// and the /.dockerenv marker that Docker writes into every container.
+//
+// Keeping the sandbox on by default and dropping it only here was prompted by
+// Dimitrios Prasakis (issue #10); the IN_DOCKER opt-in was suggested on Hacker
+// News (https://news.ycombinator.com/item?id=48534865). Thanks to both.
+func inContainer() bool {
+	if envTrue("IN_DOCKER") {
+		return true
+	}
+	if _, err := os.Stat("/.dockerenv"); err == nil {
+		return true
+	}
+	return false
+}
+
+// isRoot reports whether the process runs as the superuser. On Windows
+// os.Geteuid returns -1, so this is false there.
+func isRoot() bool {
+	return os.Geteuid() == 0
+}
+
+// envTrue reports whether the named environment variable is set to a truthy
+// value.
+func envTrue(name string) bool {
+	v, ok := envBool(name)
+	return ok && v
+}
+
+// envBool parses a boolean-ish environment variable. It returns ok=false when
+// the variable is unset or empty. "1", "true", "yes", "on" are true and "0",
+// "false", "no", "off" are false (case-insensitive); any other non-empty value
+// counts as true, so IN_DOCKER=docker reads as set.
+func envBool(name string) (val, ok bool) {
+	s := strings.TrimSpace(os.Getenv(name))
+	if s == "" {
+		return false, false
+	}
+	switch strings.ToLower(s) {
+	case "1", "true", "yes", "on":
+		return true, true
+	case "0", "false", "no", "off":
+		return false, true
+	default:
+		return true, true
 	}
 }
 

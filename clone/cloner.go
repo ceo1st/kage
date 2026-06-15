@@ -2,6 +2,7 @@ package clone
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -165,7 +166,7 @@ func (c *Cloner) Run(ctx context.Context) (Result, error) {
 		}
 	}
 
-	res := Result{Progress: c.stats.snapshot(), OutDir: c.outRoot}
+	res := Result{Progress: c.stats.snapshot(), OutDir: c.outRoot, Failures: c.stats.recordedFailures()}
 	if ctx.Err() != nil {
 		return res, ctx.Err()
 	}
@@ -236,15 +237,13 @@ func (c *Cloner) processPage(ctx context.Context, j pageItem) {
 
 	res, err := c.pool.Render(ctx, j.u.String())
 	if err != nil {
-		c.stats.pageErrors.Add(1)
-		c.logf("page error %s: %v", j.u, err)
+		c.failPage(j.u.String(), fmt.Errorf("render: %w", err))
 		return
 	}
 
 	root, err := html.Parse(strings.NewReader(res.HTML))
 	if err != nil {
-		c.stats.pageErrors.Add(1)
-		c.logf("parse error %s: %v", j.u, err)
+		c.failPage(j.u.String(), fmt.Errorf("parse: %w", err))
 		return
 	}
 
@@ -275,12 +274,11 @@ func (c *Cloner) processPage(ctx context.Context, j pageItem) {
 
 	var buf strings.Builder
 	if err := html.Render(&buf, root); err != nil {
-		c.stats.pageErrors.Add(1)
+		c.failPage(j.u.String(), fmt.Errorf("render html: %w", err))
 		return
 	}
 	if err := c.writeFile(localFile, []byte(buf.String())); err != nil {
-		c.stats.pageErrors.Add(1)
-		c.logf("write error %s: %v", localFile, err)
+		c.failPage(j.u.String(), fmt.Errorf("write %s: %w", localFile, err))
 		return
 	}
 	c.front.markVisited(key)
@@ -295,8 +293,7 @@ func (c *Cloner) processAsset(ctx context.Context, j assetItem) {
 	}
 	res, err := c.dl.Get(ctx, j.u, j.referer)
 	if err != nil {
-		c.stats.assetErrors.Add(1)
-		c.logf("asset error %s: %v", j.u, err)
+		c.failAsset(j.u.String(), j.referer, err)
 		return
 	}
 
@@ -312,11 +309,52 @@ func (c *Cloner) processAsset(ctx context.Context, j assetItem) {
 		body = asset.RewriteCSS(body, j.u, cssSink)
 	}
 	if err := c.writeFile(localFile, body); err != nil {
-		c.stats.assetErrors.Add(1)
-		c.logf("write error %s: %v", localFile, err)
+		c.failAsset(j.u.String(), j.referer, fmt.Errorf("write %s: %w", localFile, err))
 		return
 	}
 	c.stats.assets.Add(1)
+}
+
+// failAsset records and logs a failed asset, naming the page that referenced it
+// so a 403 or 404 is traceable back to where it came from. The reason is
+// classified (HTTP status, timeout, or other) for a readable line.
+func (c *Cloner) failAsset(u, referer string, err error) {
+	c.stats.assetErrors.Add(1)
+	reason := classifyError(err)
+	c.stats.recordFailure(Failure{Kind: "asset", URL: u, Referer: referer, Reason: reason})
+	if referer != "" {
+		c.logf("asset error: %s\n    %s\n    referenced by %s", reason, u, referer)
+	} else {
+		c.logf("asset error: %s\n    %s", reason, u)
+	}
+}
+
+// failPage records and logs a failed page.
+func (c *Cloner) failPage(u string, err error) {
+	c.stats.pageErrors.Add(1)
+	reason := classifyError(err)
+	c.stats.recordFailure(Failure{Kind: "page", URL: u, Reason: reason})
+	c.logf("page error: %s\n    %s", reason, u)
+}
+
+// classifyError turns an error into a short, human-readable reason for the log
+// and the final report: an HTTP status with its name, a timeout, a cancellation,
+// or the underlying message otherwise.
+func classifyError(err error) string {
+	if err == nil {
+		return ""
+	}
+	var se *asset.StatusError
+	if errors.As(err, &se) {
+		return se.Error()
+	}
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return "timed out"
+	case errors.Is(err, context.Canceled):
+		return "cancelled"
+	}
+	return err.Error()
 }
 
 // enqueuePage offers a page URL to the frontier, honouring the visited set, the

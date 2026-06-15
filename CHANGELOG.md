@@ -6,6 +6,23 @@ All notable changes to kage are recorded here. The format follows
 
 ## [Unreleased]
 
+### Security
+
+- Chrome now keeps its sandbox on by default. It was previously launched with `--no-sandbox` unconditionally, which removed Chrome's main line of defense when rendering pages from the open web (reported in #10). The sandbox is now dropped only where it genuinely cannot run: inside a container, or when running as root, and the choice is logged so it is never silent.
+
+### Added
+
+- Container-aware Chrome flags. kage detects a container from the `IN_DOCKER` environment variable or a `/.dockerenv` marker and, only there, drops the sandbox and adds `--disable-dev-shm-usage` (the default 64 MB `/dev/shm` is too small for Chrome on large pages). Outside a container the faster shared memory is left in place.
+- Asset downloads retry on a transient failure (a 403/429, a 5xx, or a network blip) with a short backoff, recovering files that bot-protection rejects on the first request of a burst. Permanent failures (404, 401, ...) are not retried.
+
+### Changed
+
+- Clearer crawl error reporting. Each failure is logged with a classified reason (`HTTP 403 Forbidden`, `timed out`, ...), the URL, and the page that referenced it, and the end-of-run summary lists what went wrong instead of printing only a count.
+
+### Fixed
+
+- The container image now runs. Chrome aborted on launch with `chrome_crashpad_handler: --database is required`, so kage disables Chrome's crash reporter inside a container, and the `kage` user now has a writable home (the mounted `/out` volume) so the default output, resume state, and Chrome's profile no longer fail with a permission error (issue #7).
+
 ## [0.1.1] - 2026-06-14
 
 ### Added
