@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -61,7 +62,11 @@ func runServe(ctx context.Context, dir, addr string) error {
 			return err
 		}
 	case <-ctx.Done():
-		_ = srv.Close()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			_ = srv.Close()
+		}
 		if err := <-srvErr; err != nil && err != http.ErrServerClosed {
 			return err
 		}
