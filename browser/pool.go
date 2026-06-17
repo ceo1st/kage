@@ -124,7 +124,14 @@ func (p *Pool) Render(ctx context.Context, rawURL string) (RenderResult, error) 
 		return RenderResult{}, fmt.Errorf("navigate %s: %w", rawURL, navErr)
 	}
 	if err := page.WaitLoad(); err != nil {
-		return RenderResult{}, fmt.Errorf("wait load %s: %w", rawURL, err)
+		// Chrome's DevTools Protocol may return "Object reference chain is too
+		// long" when a page's JavaScript builds deeply nested object graphs.
+		// The page has still loaded its HTML — the error is only about Chrome's
+		// internal object tracking, not about the document. Log the warning and
+		// continue rendering rather than failing the entire page (issue #36).
+		if !isObjRefChainError(err) {
+			return RenderResult{}, fmt.Errorf("wait load %s: %w", rawURL, err)
+		}
 	}
 	settle(page, p.opts.Settle)
 	if p.opts.Scroll {
@@ -432,6 +439,15 @@ func isHTML(contentType string) bool {
 		mt = strings.TrimSpace(mt[:i])
 	}
 	return mt == "" || mt == "text/html" || mt == "application/xhtml+xml"
+}
+
+// isObjRefChainError reports whether err is the Chrome DevTools Protocol error
+// "Object reference chain is too long" (code -32000). This surfaces when a
+// page's JavaScript builds deeply nested object graphs. The page has still
+// loaded — Chrome's internal state tracking hit a limit, not the document
+// itself (issue #36).
+func isObjRefChainError(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "Object reference chain is too long")
 }
 
 // settle waits for the network to go quiet for d, recovering from any rod
