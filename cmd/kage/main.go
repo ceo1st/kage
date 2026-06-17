@@ -7,6 +7,7 @@ import (
 	"context"
 	"os"
 	"os/signal"
+	"syscall"
 
 	"github.com/tamnd/kage/cli"
 	"github.com/tamnd/kage/viewer"
@@ -18,7 +19,13 @@ func main() {
 	// thread; in the default build this is a harmless no-op.
 	viewer.LockMainThread()
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	go func() {
+		<-ctx.Done()
+		stop()
+	}()
+
 	os.Exit(cli.Execute(ctx))
 }
