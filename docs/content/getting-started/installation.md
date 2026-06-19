@@ -28,13 +28,31 @@ scoop bucket add tamnd https://github.com/tamnd/scoop-bucket
 scoop install kage
 ```
 
+## Linux (apt and dnf)
+
+A signed apt and dnf repository tracks every release, so `apt upgrade` and
+`dnf upgrade` keep kage current.
+
+```bash
+# Debian, Ubuntu
+curl -fsSL https://tamnd.github.io/linux-repo/gpg.key \
+  | sudo gpg --dearmor -o /usr/share/keyrings/tamnd.gpg
+echo "deb [signed-by=/usr/share/keyrings/tamnd.gpg] https://tamnd.github.io/linux-repo/apt stable main" \
+  | sudo tee /etc/apt/sources.list.d/tamnd.list
+sudo apt update && sudo apt install kage
+
+# Fedora, RHEL
+sudo dnf config-manager --add-repo https://tamnd.github.io/linux-repo/dnf/tamnd.repo
+sudo dnf install kage
+```
+
 ## Release archives and Linux packages
 
 Every [release](https://github.com/tamnd/kage/releases) attaches `tar.gz`
 archives (and a `.zip` for Windows) for Linux, macOS, Windows, and FreeBSD, plus
 `.deb`, `.rpm`, and `.apk` packages and a `checksums.txt` with a cosign
 signature. Download the one for your platform, extract `kage`, and put it on your
-`PATH`.
+`PATH`. To install a package directly without the repo above:
 
 ```bash
 # Debian/Ubuntu
