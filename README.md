@@ -24,7 +24,18 @@ Full docs and guides live at **[kage.tamnd.com](https://kage.tamnd.com)**.
 go install github.com/tamnd/kage/cmd/kage@latest
 ```
 
-Prefer a prebuilt binary? Grab an archive, a `.deb`/`.rpm`/`.apk`, or a checksum from [releases](https://github.com/tamnd/kage/releases). Or skip installing Chrome yourself and use the container image, which bundles Chromium:
+Prefer a prebuilt binary? Grab an archive, a `.deb`/`.rpm`/`.apk`, or a checksum from [releases](https://github.com/tamnd/kage/releases). On a Mac or Windows box, the package managers know it:
+
+```bash
+# Homebrew (macOS)
+brew install tamnd/tap/kage
+
+# Scoop (Windows)
+scoop bucket add tamnd https://github.com/tamnd/scoop-bucket
+scoop install kage
+```
+
+Or skip installing Chrome yourself and use the container image, which bundles Chromium:
 
 ```bash
 docker run --rm -v "$PWD/out:/out" ghcr.io/tamnd/kage clone paulgraham.com

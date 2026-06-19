@@ -1,6 +1,6 @@
 ---
 title: "Installation"
-description: "Install kage from Go, Homebrew, a release archive, a Linux package, or the container image, and point it at a browser."
+description: "Install kage from Go, Homebrew, Scoop, a release archive, a Linux package, or the container image, and point it at a browser."
 weight: 20
 ---
 
@@ -12,10 +12,20 @@ kage is a single binary. Pick whichever channel suits you.
 go install github.com/tamnd/kage/cmd/kage@latest
 ```
 
-## Homebrew
+## Homebrew (macOS)
 
 ```bash
 brew install tamnd/tap/kage
+```
+
+The cask installs the prebuilt macOS binary. On Linux, use the packages below or
+`go install`.
+
+## Scoop (Windows)
+
+```bash
+scoop bucket add tamnd https://github.com/tamnd/scoop-bucket
+scoop install kage
 ```
 
 ## Release archives and Linux packages
@@ -28,10 +38,10 @@ signature. Download the one for your platform, extract `kage`, and put it on you
 
 ```bash
 # Debian/Ubuntu
-sudo dpkg -i kage_*_linux_amd64.deb
+sudo dpkg -i kage_*_amd64.deb
 
 # Fedora/RHEL
-sudo rpm -i kage_*_linux_amd64.rpm
+sudo rpm -i kage-*.x86_64.rpm
 ```
 
 ## Container
